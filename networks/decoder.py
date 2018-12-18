@@ -12,7 +12,7 @@ class Decoder(nn.Module):
         self.maximum_step = 1000
         return
     
-    def forward(self, decoder_input=None, memory):
+    def forward(self, memory, decoder_input=None):
         """
         if training time, input is given, else input is decoder outputs
         input : 
@@ -22,7 +22,7 @@ class Decoder(nn.Module):
             
         """
         batch_size = memory.size(0)
-        test = if decoder_input is None
+        test = decoder_input is None
         decoder_T = 0
         if not test:
             decoder_T = decoder_input.size(1)
