@@ -18,7 +18,10 @@ import numpy as np
 
 class HighwayNet(nn.Module):
     """
-    h * t + x * (1. - t)
+        raw_input: (batch_size, Channel, Length)
+        input: (# of batch, seq_length, 128(input feature))
+        h * t + x * (1. - t)
+        output: (# of batch, seq_length, 128(output feature))
     """
     def __init__(self):
         super(HighwayNet, self).__init__()
@@ -37,11 +40,13 @@ class HighwayNet(nn.Module):
 
 class EncoderCBHG(nn.Module):
     """
-    Conv1D bank - Max Pooling - Conv1D projection - Conv1D Layer
+        raw_input: prenet output
+        input: (batch_size, channels, seq_length)
+        Conv1D bank - Max Pooling - Conv1D projection - Conv1D Layer
+        output: (seq_length, batch_size, 2 * hidden_size)
     """
     def __init__(self, K=16):
         super(EncoderCBHG, self).__init__()
-        #conv1d: (batch_size, Channel, Length)
         #-----------------Conv1Dbank-------------------#
         self.conv1dBank = nn.ModuleList(
             [nn.Conv1d(128, 128, k, stride=1, padding=k//2)
@@ -65,20 +70,17 @@ class EncoderCBHG(nn.Module):
         
     def forward(self, x):
         """
-        Args:
-            x: A tensor with shape (batch_size, seq_length, channels)
-        Returns:
-            A tensor with shape (batch_size, seq_length, 2*hidden_size)
+            raw_input: (# of batch, seq_length, 128(output feature))
+            input: (batch_size, channels, seq_length)
+            Conv1D bank - Max Pooling - Conv1D projection - Conv1D Layer
+            output: (seq_length, batch_size, 2 * hidden_size)
         """
-        # modify the shape of x to (batch_size, channels, seq_length)
-    
-        x = x.T(1, 2) # Shape: (batch_size, channels, seq_length)
+        x = x.T(1, 2)
         #-----------------Conv1Dbank-------------------#
         stacked = []
         for conv1d in conv1dBank:
             stacked.append(self.bn(conv1d(x)))
         stacked = torch.cat(stacked, dim=1)
-        #shape: 
         #-----------------Max pooling------------------#
         y = self.maxPool(stacked)
         #---------------Conv1Dprojection---------------#
@@ -87,18 +89,23 @@ class EncoderCBHG(nn.Module):
         #-------------residual connection--------------#
         y = y + x
         #----------------Highway Net-------------------#
+        y = y.T(1, 2)
         for layer in self.highwayNet:
             y = self.relu(layer(y))
         #--------------Bidirectional GRU---------------#
+        y = y.T(0, 1)
         y, _ = self.GRU(y)
         
         return y
 
 
-
 class Prenet(nn.Module):
     """
+        raw_input: encoder input
+        input: (# of batch, seq_length, 128(output feature))
         FC(Dense) - ReLU - Dropout - FC - ReLU - Dropout
+        output: (# of batch, seq_length, 128(output feature))
+
     """
     def __init__(self):
         super(Prenet, self).__init__()
@@ -109,11 +116,12 @@ class Prenet(nn.Module):
         self.dropout = nn.Dropout(p=0.5)
         
     def forward(self, x):
+
         for layer in self.layer:
             x = self.dropout(F.relu(layer(x)))
         
         return x
-
+        
 
 class Encoder(nn.Module):
     """
@@ -129,6 +137,5 @@ class Encoder(nn.Module):
         x = self.cbhg(self.prenet(x))
         
         return x
-        
 
 
