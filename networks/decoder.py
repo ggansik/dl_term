@@ -102,68 +102,84 @@ class BahnadauAttention(nn.Module):
         attention_weight = self.v(self.tanh(self.query_layer(query) + memory))
         return attention_weight
 
+    
 class Decoder(nn.Module):
-    def __init__(self, in_dim, r=2):
+    def __init__(self, spect_dim, r=2):
         super(Decoder, self).__init__()
-        self.in_dim = in_dim
+        self.spect_dim = spect_dim
         self.r = r
         self.prenet = Prenet()
         self.attention_RNN = AttentionWrapper(nn.GRUCell(input_size=256, hidden_size =256), BahdanauAttention())
         self.decoder_RNN = nn.ModuleList(
                             [nn.GRUCell(input_size=256,hidden_size=256) for _ in range(2)])
-        self.spectro_layer = nn.Linear(256,r,bias=False)
+        self.spectro_layer = nn.Linear(256,spect_dim*r,bias=False)
         self.epsilon = 0.2
         self.maximum_step = 1000
         return
     
-    def forward(self, memory, decoder_input=None):
+    def forward(self, memory, target=None):
         """
         if training time, input is given, else input is decoder outputs
         input : 
-            memory (encoder_output) = (batch_size, encoder_T, dim)
-            decoder_input = (batch_size, decoder_T/self.r, dim)
+            memory (encoder_output) = (batch_size, encoder_T, char_dim)
+            decoder_input = (batch_size, decoder_T, dim)
         output:
             
         """
         batch_size = memory.size(0)
-        test = decoder_input is None
+        test = target is None
         decoder_T = 0
+        
+        #train data를 r 단위로 묶어준 후 T의 크기를 바꾸어준다.
         if not test:
-            decoder_T = decoder_input.size(1)
+            target = target.view(batch_size, target.size(1) // r, -1)
+            decoder_T = target.size(1)
+            target = target.transpose(0,1) #for parallelization
+            
+        #2단계 decoderRNN 값 저장할 array
         decoderRNN_output = [memory.zero_() for _ in range(len(decoder_RNN))] 
+        
         #<GO> Frame
-        current_input = torch.zero([batch_size, 1 * self.r, 256])
+        current_input = torch.zero([batch_size, self.r*self.spect_dim])
         t = 0
         targets = []
         
         while (True):
             t = t + 1
+            #prenet
+            #(B, spect_dim * r)
             prenet_output = self.prenet(current_input)
+            
+            #attention
+            #(B, spect_dim * r)
             attention_output, cell_hidden = self.attention(memory, prenet_output, cell_hidden)
             
+            #decoder
+            #(B, spect_dim * r)
             for idx in range(2):
                 decoderRNN_output[idx] = self.decoder_RNN[idx](attention_output, decoder_output[idx])
                 decoderRNN_output[idx] += attention_output
                 attention_output = decoder_output[idx]
             
-            target=self.spectro_layer(attention_output)
-            targets += [target]
+            #projection
+            targetchar =self.spectro_layer(attention_output)
+            targets += [targetchar]
             
             #check if this target is the end
             if test:
-                if t > 0 and (target<=self.epsilon).all(): break
+                if t > 1 and (targetchar<=self.epsilon).all(): break
                 if t > self.maximum_step: 
                     print("ERROR : Not converge")
                     break
             else:
                 if t >= decoder_T:
-                    print("ERROR : Iterate too much in train time")
                     break
                     
             #change current input
             if test:
-                current_input = target
+                current_input = targets[-1]
             else:
-                current_input = decoder_input[t-1]
-            
+                current_input = target[t-1]
+        
+        outputs = torch.stack(outputs).transpose(0,1).contiguous()
         return outputs
