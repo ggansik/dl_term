@@ -152,7 +152,7 @@ class Decoder(nn.Module):
         
         #train data를 r 단위로 묶어준 후 T의 크기를 바꾸어준다.
         if not test:
-            target = target.view(batch_size, target.size(1) // r, -1)
+            target = target.view(batch_size, target.size(1) // self.r, -1)
             decoder_T = target.size(1)
             target = target.transpose(0,1) #for parallelization
             
