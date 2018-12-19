@@ -1,3 +1,17 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.autograd import Variable
+from torch.utils.data import DataLoader
+from torch.utils.data import sampler
+import torch.nn.functional as F
+
+import torchvision.datasets as dset
+import torchvision.transforms as T
+
+import numpy as np
+
+
 class HighwayNet(nn.Module):
     """
     h * t + x * (1. - t)
@@ -74,27 +88,28 @@ class AttentionWrapper(nn.Module):
         self.rnn_cell = rnn
         self.attention = use_attention
         self.projection_for_decoderRNN = nn.Linear(512, 256, bias=False)
-    def forward(memory, decoder_input, cell_hidden):
+    def forward(self, memory, decoder_input, cell_hidden):
         """
         memory = (batch_size, encoder_T, dim)
         decoder_input = (batch_size, dim)
         cell_hidden (previous time step cell state) = (batch, dim)
         """
+        batch_size = memory.size(0)
         #cell_input = torch.cat((decoder_input, prev_attention), -1) -- why do we have to concat?
         cell_input = decoder_input
         query = self.rnn_cell(cell_input, cell_hidden)
         #feed into attention
         attention_weights = self.attention(query, memory)
         #make context vector
-        attention_weights = F.softmax(attention_weights)
-        context = torch.bmm(attention_weights.view(batch, 1, -1), memory).squeeze(1)
+        attention_weights = F.softmax(attention_weights, dim=-1)
+        context = torch.bmm(attention_weights.view(batch_size, 1, -1), memory).squeeze(1)
         out = self.projection_for_decoderRNN(torch.cat([context, query],dim=-1))
         return out, query, attention_weights
 
 
-class BahnadauAttention(nn.Module):
+class BahdanauAttention(nn.Module):
     def __init__(self):
-        super(BahnadauAttention, self).__init__()
+        super(BahdanauAttention, self).__init__()
         self.v = nn.Linear(256,1,bias=False)
         self.query_layer = nn.Linear(256,256,bias=False)
         self.tanh = nn.Tanh()
@@ -107,7 +122,7 @@ class BahnadauAttention(nn.Module):
         attention_weight = self.v(self.tanh(self.query_layer(query) + memory))
         return attention_weight
 
-    
+
 class Decoder(nn.Module):
     def __init__(self, spect_dim, r=2):
         super(Decoder, self).__init__()
