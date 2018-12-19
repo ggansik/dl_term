@@ -77,7 +77,7 @@ class AttentionWrapper(nn.Module):
     def forward(memory, decoder_input, cell_hidden):
         """
         memory = (batch_size, encoder_T, dim)
-        decoder_input = (batch_size, self.r, dim)
+        decoder_input = (batch_size, dim)
         cell_hidden (previous time step cell state) = (batch, dim)
         """
         #cell_input = torch.cat((decoder_input, prev_attention), -1) -- why do we have to concat?
@@ -87,9 +87,9 @@ class AttentionWrapper(nn.Module):
         attention_weights = self.attention(query, memory)
         #make context vector
         attention_weights = F.softmax(attention_weights)
-        context = torch.bmm(attention_weights.view([batch, 1, -1]), memory).squeeze(1)
-        out = self.projection_for_decoderRNN(dorch.cat([context, query],dim=-1))
-        return out, query
+        context = torch.bmm(attention_weights.view(batch, 1, -1), memory).squeeze(1)
+        out = self.projection_for_decoderRNN(torch.cat([context, query],dim=-1))
+        return out, query, attention_weights
 
 
 class BahnadauAttention(nn.Module):
@@ -99,6 +99,11 @@ class BahnadauAttention(nn.Module):
         self.query_layer = nn.Linear(256,256,bias=False)
         self.tanh = nn.Tanh()
     def forward(self, query, memory):
+        """
+        query : (batch, 1 ,dim)
+        """
+        if query.dim() == 2:
+            query = query.unsqueeze(1)
         attention_weight = self.v(self.tanh(self.query_layer(query) + memory))
         return attention_weight
 
@@ -143,6 +148,7 @@ class Decoder(nn.Module):
         current_input = torch.zero([batch_size, self.r*self.spect_dim])
         t = 0
         targets = []
+        attention_weights = []
         
         while (True):
             t = t + 1
@@ -151,8 +157,8 @@ class Decoder(nn.Module):
             prenet_output = self.prenet(current_input)
             
             #attention
-            #(B, spect_dim * r)
-            attention_output, cell_hidden = self.attention(memory, prenet_output, cell_hidden)
+            #(B, 256)
+            attention_output, cell_hidden, attention_weight = self.attention(memory, prenet_output, cell_hidden)
             
             #decoder
             #(B, spect_dim * r)
@@ -164,6 +170,7 @@ class Decoder(nn.Module):
             #projection
             targetchar =self.spectro_layer(attention_output)
             targets += [targetchar]
+            attention_weights += [attention_weight]
             
             #check if this target is the end
             if test:
@@ -181,5 +188,6 @@ class Decoder(nn.Module):
             else:
                 current_input = target[t-1]
         
+        attention_weights = torch.stack(attention_weights).transpose(0,1)
         outputs = torch.stack(outputs).transpose(0,1).contiguous()
-        return outputs
+        return outputs, attention_weights
